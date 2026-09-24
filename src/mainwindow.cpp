@@ -5,6 +5,8 @@
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include <QWKWidgets/widgetwindowagent.h>
+
 #include <QApplication>
 #include <QClipboard>
 #include <QDesktopServices>
@@ -24,11 +26,14 @@
 #include <QMimeDatabase>
 #include <QMimeType>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollBar>
 #include <QSettings>
+#include <QShowEvent>
 #include <QSizePolicy>
 #include <QStatusBar>
 #include <QStyleFactory>
+#include <QStyleHints>
 #include <QTextDocumentFragment>
 #include <QToolButton>
 #include <QWhatsThis>
@@ -44,10 +49,10 @@
 #include "settings/preferencesdialog.h"
 #include "settings/previewoptionsdialog.h"
 #include "settings/simplefontdialog.h"
-#include "theme/stylesheetbuilder.h"
-#include "theme/themeselectiondialog.h"
 #include "spelling/spellcheckdecorator.h"
 #include "spelling/spellcheckdialog.h"
+#include "theme/stylesheetbuilder.h"
+#include "theme/themeselectiondialog.h"
 
 #include "findreplace.h"
 #include "library.h"
@@ -80,6 +85,18 @@ MainWindow::MainWindow(const QString &filePath, QWidget *parent)
     Bookmark fileToOpen(filePath);
 
     focusModeEnabled = false;
+    sidebar = nullptr;
+    htmlPreview = nullptr;
+    splitter = nullptr;
+    outlineWidget = nullptr;
+    documentStats = nullptr;
+    documentStatsWidget = nullptr;
+    sessionStats = nullptr;
+    sessionStatsWidget = nullptr;
+    cheatSheetWidget = nullptr;
+    statisticsIndicator = nullptr;
+    statusIndicator = nullptr;
+    timeIndicator = nullptr;
     appSettings = AppSettings::instance();
 
     loadTheme();
@@ -90,6 +107,7 @@ MainWindow::MainWindow(const QString &filePath, QWidget *parent)
     setupActions();
 
     setWindowTitle(documentManager->document()->displayName() + "[*] - " + qAppName());
+    updatePageTitle();
 
     // If the file specified as a command line argument does not exist, then
     // create it.
@@ -126,18 +144,42 @@ MainWindow::MainWindow(const QString &filePath, QWidget *parent)
     connect(appSettings, &AppSettings::previewCodeFontChanged, this, &MainWindow::applyTheme);
 
     connect(documentManager, &DocumentManager::documentLoaded, documentManager, [this]() {
-        sessionStats->startNewSession(documentStats->wordCount());
+        if (sessionStats && documentStats) {
+            sessionStats->startNewSession(documentStats->wordCount());
+        }
         refreshRecentFiles();
 
-        folderViewWidget->reloadFolderViewFromPath(documentManager->document()->filePath(), appSettings->folderViewShowAllFilesEnabled());
+        if (folderViewWidget) {
+            folderViewWidget->reloadFolderViewFromPath(documentManager->document()->filePath(), appSettings->folderViewShowAllFilesEnabled());
+        }
+        updatePageTitle();
     });
 
     connect(documentManager, &DocumentManager::documentClosed, documentManager, [this]() {
-        sessionStats->startNewSession(0);
+        if (sessionStats) {
+            sessionStats->startNewSession(0);
+        }
+        updatePageTitle();
     });
 
-    connect(folderViewWidget, &FolderViewWidget::fileSelected, documentManager, [this](const QString &filePath) {
-        documentManager->openFileAt(Bookmark(filePath), true);
+    if (folderViewWidget) {
+        connect(folderViewWidget, &FolderViewWidget::fileSelected, documentManager, [this](const QString &filePath) {
+            documentManager->openFileAt(Bookmark(filePath), true);
+        });
+    }
+
+    connect(editor, &MarkdownEditor::textChanged, this, &MainWindow::updatePageTitle);
+    connect(editor, &MarkdownEditor::typingResumed, this, [this]() {
+        m_suppressEdgeBars = true;
+        hideEdgeBars();
+        if (m_shortcutsPanel) {
+            m_shortcutsPanel->hide();
+        }
+    });
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this]() {
+        if (m_colorMode == MarginColorMode::System) {
+            applyTheme();
+        }
     });
 
     qApp->installEventFilter(this);
@@ -186,32 +228,51 @@ MainWindow::~MainWindow()
 
 QSize MainWindow::sizeHint() const
 {
-    return QSize(800, 500);
+    return QSize(1280, 800);
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
-    int width = event->size().width();
+    if (sidebar) {
+        int width = event->size().width();
 
-    if (width < (0.5 * qApp->primaryScreen()->size().width())) {
-        this->sidebar->setVisible(false);
-        this->sidebar->setAutoHideEnabled(true);
-        this->sidebarHiddenForResize = true;
-    }
-    else {
-        this->sidebarHiddenForResize = false;
-
-        if (!this->focusModeEnabled && this->appSettings->sidebarVisible()) {
-            this->sidebar->setAutoHideEnabled(false);
-            this->sidebar->setVisible(true);
-        }
-        else {
-            this->sidebar->setAutoHideEnabled(true);
+        if (width < (0.5 * qApp->primaryScreen()->size().width())) {
             this->sidebar->setVisible(false);
+            this->sidebar->setAutoHideEnabled(true);
+            this->sidebarHiddenForResize = true;
+        } else {
+            this->sidebarHiddenForResize = false;
+
+            if (!this->focusModeEnabled && this->appSettings->sidebarVisible()) {
+                this->sidebar->setAutoHideEnabled(false);
+                this->sidebar->setVisible(true);
+            } else {
+                this->sidebar->setAutoHideEnabled(true);
+                this->sidebar->setVisible(false);
+            }
         }
     }
 
+    placeEdgeBars();
     adjustEditor();
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+    placeEdgeBars();
+    editor->setFocus();
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+
+    if (event->type() == QEvent::WindowStateChange && m_topEdgeBar) {
+        m_topEdgeBar->setMaximized(isMaximized());
+    } else if (event->type() == QEvent::ActivationChange && !isActiveWindow()) {
+        hideEdgeBars();
+    }
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *e)
@@ -220,6 +281,19 @@ void MainWindow::keyPressEvent(QKeyEvent *e)
 
     switch (key) {
     case Qt::Key_Escape:
+        if (m_shortcutsPanel && m_shortcutsPanel->isVisible()) {
+            m_shortcutsPanel->hide();
+            return;
+        }
+        if (m_pages && m_pages->currentWidget() == m_readView) {
+            appAction(AppActions::Preview)->setChecked(false);
+            toggleReadView(false);
+            return;
+        }
+        if (this->isFullScreen()) {
+            toggleFullScreen(false);
+        }
+        break;
     case Qt::Key_F11:
         if (this->isFullScreen()) {
             toggleFullScreen(false);
@@ -238,8 +312,7 @@ void MainWindow::keyPressEvent(QKeyEvent *e)
         if (findReplace->isVisible() && findReplace->hasFocus()) {
             findReplace->keyPressEvent(e);
             return;
-        }
-        else if (!this->editor->hasFocus()) {
+        } else if (!this->editor->hasFocus()) {
             QMainWindow::keyPressEvent(e);
         }
         break;
@@ -252,10 +325,28 @@ void MainWindow::keyPressEvent(QKeyEvent *e)
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 {
+    if (event->type() == QEvent::MouseMove) {
+        auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        const QPoint local = mapFromGlobal(mouseEvent->globalPosition().toPoint());
+
+        if (rect().contains(local)) {
+            m_suppressEdgeBars = false;
+            updateEdgeBarsForPointer(local);
+        }
+    }
+
+    if (event->type() == QEvent::MouseButtonPress && m_shortcutsPanel && m_shortcutsPanel->isVisible()) {
+        auto *clickedWidget = qobject_cast<QWidget *>(obj);
+        const bool insidePanel = clickedWidget && (clickedWidget == m_shortcutsPanel || m_shortcutsPanel->isAncestorOf(clickedWidget));
+        const bool onHelpButton = clickedWidget == m_bottomEdgeBar->shortcutsButton();
+
+        if (!insidePanel && !onHelpButton) {
+            m_shortcutsPanel->hide();
+        }
+    }
+
     if (this->isFullScreen() && appSettings->hideMenuBarInFullScreenEnabled()) {
-        if ((this->menuBar() == obj) 
-                && (QEvent::Leave == event->type()) 
-                && !menuBarMenuActivated) {
+        if ((this->menuBar() == obj) && (QEvent::Leave == event->type()) && !menuBarMenuActivated) {
             this->menuBar()->hide();
         } else if (QEvent::MouseMove == event->type()) {
             QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
@@ -263,9 +354,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
             if ((mouseEvent->globalPosition().y() <= 0) && !this->menuBar()->isVisible()) {
                 this->menuBar()->show();
             }
-        } else if ((this == obj) 
-                && (((QEvent::Leave == event->type()) && !menuBarMenuActivated) 
-                    || (QEvent::WindowDeactivate == event->type()))) {
+        } else if ((this == obj) && (((QEvent::Leave == event->type()) && !menuBarMenuActivated) || (QEvent::WindowDeactivate == event->type()))) {
             this->menuBar()->hide();
         }
     }
@@ -291,12 +380,16 @@ void MainWindow::quitApplication()
 
         windowSettings.setValue(GW_MAIN_WINDOW_GEOMETRY_KEY, saveGeometry());
         windowSettings.setValue(GW_MAIN_WINDOW_STATE_KEY, saveState());
-        windowSettings.setValue(GW_SPLITTER_GEOMETRY_KEY, splitter->saveState());
+        if (splitter) {
+            windowSettings.setValue(GW_SPLITTER_GEOMETRY_KEY, splitter->saveState());
+        }
         windowSettings.sync();
 
         this->editor->document()->disconnect();
         this->editor->disconnect();
-        this->htmlPreview->disconnect();
+        if (htmlPreview) {
+            this->htmlPreview->disconnect();
+        }
         StyleSheetBuilder::clearCache();
 
         qApp->quit();
@@ -326,6 +419,10 @@ void MainWindow::openPreferencesDialog()
 
 void MainWindow::toggleHtmlPreview(bool checked)
 {
+    if (!htmlPreview) {
+        return;
+    }
+
     htmlPreview->setVisible(checked);
     htmlPreview->updatePreview();
     appSettings->setHtmlPreviewVisible(checked);
@@ -346,14 +443,20 @@ void MainWindow::toggleFocusMode(bool checked)
 {
     this->focusModeEnabled = checked;
 
+    if (m_bottomEdgeBar) {
+        m_bottomEdgeBar->setFocusMode(checked);
+    }
+
     if (checked) {
         editor->setFocusMode(appSettings->focusMode());
-        sidebar->setVisible(false);
-        sidebar->setAutoHideEnabled(true);
+        if (sidebar) {
+            sidebar->setVisible(false);
+            sidebar->setAutoHideEnabled(true);
+        }
     } else {
         editor->setFocusMode(FocusModeDisabled);
 
-        if (!this->sidebarHiddenForResize && this->appSettings->sidebarVisible()) {
+        if (sidebar && !this->sidebarHiddenForResize && this->appSettings->sidebarVisible()) {
             sidebar->setAutoHideEnabled(false);
             sidebar->setVisible(true);
         }
@@ -365,7 +468,7 @@ void MainWindow::toggleFullScreen(bool checked)
     static bool lastStateWasMaximized = false;
 
     if (this->isFullScreen() || !checked) {
-        if (appSettings->displayTimeInFullScreenEnabled()) {
+        if (timeIndicator && appSettings->displayTimeInFullScreenEnabled()) {
             timeIndicator->hide();
         }
 
@@ -382,11 +485,8 @@ void MainWindow::toggleFullScreen(bool checked)
             showNormal();
         }
 
-        if (appSettings->hideMenuBarInFullScreenEnabled()) {
-            this->menuBar()->show();
-        }
     } else {
-        if (appSettings->displayTimeInFullScreenEnabled()) {
+        if (timeIndicator && appSettings->displayTimeInFullScreenEnabled()) {
             timeIndicator->show();
         }
 
@@ -397,10 +497,6 @@ void MainWindow::toggleFullScreen(bool checked)
         }
 
         showFullScreen();
-
-        if (appSettings->hideMenuBarInFullScreenEnabled()) {
-            this->menuBar()->hide();
-        }
     }
 }
 
@@ -433,7 +529,7 @@ void MainWindow::toggleFolderViewShowAllFilesEnabled(bool checked)
 
 void MainWindow::toggleDisplayTimeInFullScreen(bool checked)
 {
-    if (this->isFullScreen()) {
+    if (timeIndicator && this->isFullScreen()) {
         if (checked) {
             this->timeIndicator->show();
         } else {
@@ -514,6 +610,7 @@ void MainWindow::clearRecentFileHistory()
 void MainWindow::changeDocumentDisplayName(const QString &displayName)
 {
     setWindowTitle(displayName + QString("[*] - ") + qAppName());
+    updatePageTitle();
 
     if (documentManager->document()->isModified()) {
         setWindowModified(!appSettings->autoSaveEnabled());
@@ -524,6 +621,10 @@ void MainWindow::changeDocumentDisplayName(const QString &displayName)
 
 void MainWindow::onOperationStarted(const QString &description)
 {
+    if (!statusIndicator || !statisticsIndicator) {
+        return;
+    }
+
     if (!description.isNull()) {
         statusIndicator->setText(description);
     }
@@ -536,6 +637,10 @@ void MainWindow::onOperationStarted(const QString &description)
 
 void MainWindow::onOperationFinished()
 {
+    if (!statusIndicator || !statisticsIndicator) {
+        return;
+    }
+
     statusIndicator->setText(QString());
     statisticsIndicator->show();
     statusIndicator->hide();
@@ -547,8 +652,7 @@ void MainWindow::changeFont()
 {
     bool success;
 
-    QFont font =
-        SimpleFontDialog::font(&success, editor->font(), this);
+    QFont font = SimpleFontDialog::font(&success, editor->font(), this);
 
     if (success) {
         editor->setFont(font.family(), font.pointSize());
@@ -608,10 +712,7 @@ void MainWindow::onAboutToHideMenuBarMenu()
 {
     menuBarMenuActivated = false;
 
-    if (!this->menuBar()->underMouse()
-            && this->isFullScreen()
-            && appSettings->hideMenuBarInFullScreenEnabled()
-            && this->menuBar()->isVisible()) {
+    if (!this->menuBar()->underMouse() && this->isFullScreen() && appSettings->hideMenuBarInFullScreenEnabled() && this->menuBar()->isVisible()) {
         this->menuBar()->hide();
     }
 }
@@ -620,9 +721,7 @@ void MainWindow::onAboutToShowMenuBarMenu()
 {
     menuBarMenuActivated = true;
 
-    if (this->isFullScreen()
-            && appSettings->hideMenuBarInFullScreenEnabled()
-            && !this->menuBar()->isVisible()) {
+    if (this->isFullScreen() && appSettings->hideMenuBarInFullScreenEnabled() && !this->menuBar()->isVisible()) {
         this->menuBar()->show();
     }
 }
@@ -638,14 +737,15 @@ void MainWindow::onSidebarVisibilityChanged(bool visible)
 
 void MainWindow::toggleSidebarVisible(bool visible)
 {
+    if (!sidebar) {
+        return;
+    }
+
     this->appSettings->setSidebarVisible(visible);
 
-    if (!this->sidebarHiddenForResize
-            && !this->focusModeEnabled
-            && this->appSettings->sidebarVisible()) {
+    if (!this->sidebarHiddenForResize && !this->focusModeEnabled && this->appSettings->sidebarVisible()) {
         sidebar->setAutoHideEnabled(false);
-    }
-    else {
+    } else {
         sidebar->setAutoHideEnabled(true);
     }
 
@@ -682,23 +782,8 @@ QAction *MainWindow::appAction(AppActions::ActionType actionType) const
 
 void MainWindow::loadTheme()
 {
-    QString err;
-    QString themeName = appSettings->themeName();
-    ThemeRepository themeRepo(appSettings->themeDirectoryPath());
-
-    theme = themeRepo.loadTheme(themeName, err);
-
-    if (!theme.name().isEmpty()) {
-        appSettings->setThemeName(theme.name());
-    }
-
-    ColorScheme colorScheme;
-
-    if (appSettings->darkModeEnabled()) {
-        colorScheme = theme.darkColorScheme();
-    } else {
-        colorScheme = theme.lightColorScheme();
-    }
+    m_colorMode = savedMarginColorMode();
+    const ColorScheme colorScheme = marginColorScheme(currentMarginTheme());
 
     ChromeColors chromeColors(colorScheme);
 
@@ -816,32 +901,46 @@ void MainWindow::setupActions()
     // View Menu Actions
 
     appAction(AppActions::FullScreen)->setChecked(isFullScreen());
+    appAction(AppActions::FullScreen)->setShortcut(QKeySequence(Qt::Key_F11));
     m_actions->connect(AppActions::FullScreen, this, &MainWindow::toggleFullScreen);
     appAction(AppActions::DistractionFreeMode)->setChecked(false);
     m_actions->connect(AppActions::DistractionFreeMode, this, &MainWindow::toggleFocusMode);
-    appAction(AppActions::Preview)->setChecked(appSettings->htmlPreviewVisible());
-    m_actions->connect(AppActions::Preview, this, &MainWindow::toggleHtmlPreview);
+    appAction(AppActions::Preview)->setChecked(false);
+    m_actions->connect(AppActions::Preview, this, &MainWindow::toggleReadView);
     m_actions->connect(AppActions::HemingwayMode, this, &MainWindow::toggleHemingwayMode);
-    appAction(AppActions::DarkMode)->setChecked(appSettings->darkModeEnabled());
+    appAction(AppActions::DarkMode)->setChecked(marginIsDark(m_colorMode));
     m_actions->connect(AppActions::DarkMode, this, [this](bool enabled) {
-        appSettings->setDarkModeEnabled(enabled);
+        m_colorMode = enabled ? MarginColorMode::Dark : MarginColorMode::Light;
+        storeMarginColorMode(m_colorMode);
         applyTheme();
     });
-    appAction(AppActions::ShowSidebar)->setChecked(appSettings->sidebarVisible());
+    appAction(AppActions::ShowSidebar)->setChecked(false);
     m_actions->connect(AppActions::ShowSidebar, this, &MainWindow::toggleSidebarVisible);
     m_actions->connect(AppActions::ShowOutline, this, [this]() {
+        if (!sidebar) {
+            return;
+        }
         sidebar->setVisible(true);
         sidebar->setCurrentTabIndex(OutlineSidebarTab);
     });
     m_actions->connect(AppActions::ShowSessionStatistics, this, [this]() {
+        if (!sidebar) {
+            return;
+        }
         sidebar->setVisible(true);
         sidebar->setCurrentTabIndex(SessionStatsSidebarTab);
     });
     m_actions->connect(AppActions::ShowDocumentStatistics, this, [this]() {
+        if (!sidebar) {
+            return;
+        }
         sidebar->setVisible(true);
         sidebar->setCurrentTabIndex(DocumentStatsSidebarTab);
     });
     m_actions->connect(AppActions::ShowCheatSheet, this, [this]() {
+        if (!sidebar) {
+            return;
+        }
         sidebar->setVisible(true);
         sidebar->setCurrentTabIndex(CheatSheetSidebarTab);
     });
@@ -865,6 +964,97 @@ void MainWindow::setupActions()
     m_actions->connect(AppActions::ReportBug, m_helpMenu, &KHelpMenu::reportBug);
     m_actions->connect(AppActions::Donate, m_helpMenu, &KHelpMenu::donate);
     m_actions->connect(AppActions::WhatsThis, this, &QWhatsThis::enterWhatsThisMode);
+
+    const auto windowActions = m_actionCollection->actions();
+    for (QAction *action : windowActions) {
+        addAction(action);
+    }
+
+    m_toggleFontAction = new QAction(tr("Serif / Sans"), this);
+    m_toggleFontAction->setShortcut(QKeySequence(tr("CTRL+SHIFT+F")));
+    m_toggleFontAction->setShortcutContext(Qt::WindowShortcut);
+    connect(m_toggleFontAction, &QAction::triggered, this, &MainWindow::toggleWritingFont);
+    addAction(m_toggleFontAction);
+
+    setupShortcutsPanel();
+}
+
+void MainWindow::setupShortcutsPanel()
+{
+    m_shortcutsPanel = new ShortcutsPanel(this);
+    m_shortcutsPanel->setEntries({
+        {tr("Serif / Sans font"), m_toggleFontAction},
+        {tr("Dark / light mode"), appAction(AppActions::DarkMode)},
+        {tr("Focus mode"), appAction(AppActions::DistractionFreeMode)},
+        {tr("Rendered view (Esc to go back)"), appAction(AppActions::Preview)},
+        {tr("Full screen"), appAction(AppActions::FullScreen)},
+        {tr("Bold"), appAction(AppActions::Strong)},
+        {tr("Italic"), appAction(AppActions::Emphasis)},
+        {tr("New"), appAction(AppActions::New)},
+        {tr("Open"), appAction(AppActions::Open)},
+        {tr("Save"), appAction(AppActions::Save)},
+        {tr("Find"), appAction(AppActions::Find)},
+    });
+    m_shortcutsPanel->applyTheme(currentMarginTheme());
+    m_windowAgent->setHitTestVisible(m_shortcutsPanel, true);
+
+    connect(m_bottomEdgeBar, &BottomEdgeBar::shortcutsToggled, this, &MainWindow::toggleShortcutsPanel);
+}
+
+void MainWindow::toggleShortcutsPanel()
+{
+    if (m_shortcutsPanel->isVisible()) {
+        m_shortcutsPanel->hide();
+        return;
+    }
+
+    placeShortcutsPanel();
+    m_shortcutsPanel->show();
+    m_shortcutsPanel->raise();
+}
+
+void MainWindow::placeShortcutsPanel()
+{
+    constexpr int sideGap = 20;
+    constexpr int bottomBarHeight = 44;
+    constexpr int gapAboveBar = 4;
+
+    if (!m_shortcutsPanel) {
+        return;
+    }
+
+    const QSize size = m_shortcutsPanel->sizeHint();
+    m_shortcutsPanel->setGeometry(width() - size.width() - sideGap, height() - bottomBarHeight - gapAboveBar - size.height(), size.width(), size.height());
+}
+
+void MainWindow::applyWritingFont()
+{
+    constexpr int serifPixelSize = 20;
+    constexpr int sansPixelSize = 18;
+
+    QFont writingFont(m_useSansFont ? QStringLiteral("Segoe UI") : qApp->property("marginWritingFamily").toString());
+    writingFont.setPixelSize(m_useSansFont ? sansPixelSize : serifPixelSize);
+    writingFont.setWeight(QFont::Normal);
+    writingFont.setStyleStrategy(QFont::PreferAntialias);
+
+    editor->setWritingFont(writingFont);
+    appSettings->setEditorFont(writingFont);
+}
+
+void MainWindow::toggleWritingFont()
+{
+    const int cursorPosition = editor->textCursor().position();
+    const int scrollPosition = editor->verticalScrollBar()->value();
+
+    m_useSansFont = !m_useSansFont;
+    QSettings().setValue(QStringLiteral("margin/sansFont"), m_useSansFont);
+    applyWritingFont();
+    applyTheme();
+
+    QTextCursor cursor = editor->textCursor();
+    cursor.setPosition(cursorPosition);
+    editor->setTextCursor(cursor);
+    editor->verticalScrollBar()->setValue(scrollPosition);
 }
 
 void MainWindow::setupGui()
@@ -874,9 +1064,11 @@ void MainWindow::setupGui()
 
     MarkdownDocument *document = new MarkdownDocument();
 
-    editor = new MarkdownEditor(document, theme.lightColorScheme(), this);
-    editor->setMinimumWidth(0.1 * qApp->primaryScreen()->size().width());
-    editor->setFont(appSettings->editorFont().family(), appSettings->editorFont().pointSize());
+    editor = new MarkdownEditor(document, marginColorScheme(currentMarginTheme()), this);
+    editor->setFrameStyle(QFrame::NoFrame);
+    editor->setMinimumWidth(0);
+    m_useSansFont = QSettings().value(QStringLiteral("margin/sansFont"), false).toBool();
+    applyWritingFont();
     editor->setUseUnderlineForEmphasis(appSettings->useUnderlineForEmphasis());
     editor->setEnableLargeHeadingSizes(appSettings->largeHeadingSizesEnabled());
     editor->setAutoMatchEnabled(appSettings->autoMatchEnabled());
@@ -939,72 +1131,23 @@ void MainWindow::setupGui()
     findReplace->setFindPreviousIcon(primaryIconTheme->icon("find-previous"));
     findReplace->setCloseIcon(primaryIconTheme->icon("close"));
 
-    setupSidebar();
-    setupMenuBar();
-    setupStatusBar();
+    setMinimumSize(560, 400);
 
-    // Note that the parent widget for this new window must be NULL, so that
-    // it will hide beneath other windows when it is deactivated.
-    //
-    htmlPreview = new HtmlPreview(documentManager->document(), appSettings->currentHtmlExporter(), this);
+    m_readView = new ReadView(this);
+    m_pages = new QStackedWidget(this);
+    m_pages->addWidget(editor);
+    m_pages->addWidget(m_readView);
+    setCentralWidget(m_pages);
 
-    connect(editor, &MarkdownEditor::typingPausedScaled, htmlPreview, &HtmlPreview::updatePreview);
-
-    connect(documentManager, &DocumentManager::documentLoaded, htmlPreview, &HtmlPreview::updatePreview);
-
-    connect(documentManager, &DocumentManager::documentClosed, htmlPreview, &HtmlPreview::updatePreview);
-
-    connect(outlineWidget, &OutlineWidget::headingNumberNavigated, htmlPreview, &HtmlPreview::navigateToHeading);
-    connect(appSettings, &AppSettings::currentHtmlExporterChanged, htmlPreview, &HtmlPreview::setHtmlExporter);
-
-    htmlPreview->setMinimumWidth(0.1 * qApp->primaryScreen()->size().width());
-    htmlPreview->setObjectName("htmlpreview");
-    htmlPreview->setVisible(appSettings->htmlPreviewVisible());
-
-    // Set dimensions for the main window.  This is best done before
-    // building the status bar, so that we can determine whether the full
-    // screen button should be checked.
-    //
     QSettings windowSettings;
 
     if (windowSettings.contains(GW_MAIN_WINDOW_GEOMETRY_KEY)) {
         restoreGeometry(windowSettings.value(GW_MAIN_WINDOW_GEOMETRY_KEY).toByteArray());
-        restoreState(windowSettings.value(GW_MAIN_WINDOW_STATE_KEY).toByteArray());
     } else {
-        adjustSize();
+        resize(1280, 800);
     }
 
-    splitter = new QSplitter(this);
-    splitter->addWidget(sidebar);
-    splitter->addWidget(editor);
-    splitter->addWidget(htmlPreview);
-    splitter->setChildrenCollapsible(false);
-    splitter->setStretchFactor(0, 0);
-    splitter->setStretchFactor(1, 2);
-    splitter->setStretchFactor(2, 1);
-
-    // Set default sizes for splitter.
-    QList<int> sizes;
-    int sidebarWidth = width() * 0.2;
-    int otherWidth = (width() - sidebarWidth) / 2;
-    sizes.append(sidebarWidth);
-    sizes.append(otherWidth);
-    sizes.append(otherWidth);
-
-    splitter->setSizes(sizes);
-
-    // If previous splitter geometry was stored, load it.
-    if (windowSettings.contains(GW_SPLITTER_GEOMETRY_KEY)) {
-        splitter->restoreState(windowSettings.value(GW_SPLITTER_GEOMETRY_KEY).toByteArray());
-    }
-
-    connect(splitter, &QSplitter::splitterMoved, splitter, [this](int pos, int index) {
-        Q_UNUSED(pos)
-        Q_UNUSED(index)
-        adjustEditor();
-    });
-
-    setCentralWidget(splitter);
+    setupFramelessWindow();
 }
 
 void MainWindow::setupMenuBar()
@@ -1159,13 +1302,13 @@ void MainWindow::setupStatusBar()
 
     QHBoxLayout *leftLayout = new QHBoxLayout(leftWidget);
     leftWidget->setLayout(leftLayout);
-    leftLayout->setContentsMargins(0,0,0,0);
+    leftLayout->setContentsMargins(0, 0, 0, 0);
     QHBoxLayout *midLayout = new QHBoxLayout(midWidget);
     midWidget->setLayout(midLayout);
-    midLayout->setContentsMargins(0,0,0,0);
+    midLayout->setContentsMargins(0, 0, 0, 0);
     QHBoxLayout *rightLayout = new QHBoxLayout(rightWidget);
     rightWidget->setLayout(rightLayout);
-    rightLayout->setContentsMargins(0,0,0,0);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
 
     // Add left-most widgets to status bar.
     QToolButton *button = new QToolButton();
@@ -1195,11 +1338,9 @@ void MainWindow::setupStatusBar()
 
     statisticsIndicator = new StatisticsIndicator(this->documentStats, this->sessionStats, this);
 
-    if ((appSettings->favoriteStatistic() >= 0)
-            && (appSettings->favoriteStatistic() < statisticsIndicator->count())) {
+    if ((appSettings->favoriteStatistic() >= 0) && (appSettings->favoriteStatistic() < statisticsIndicator->count())) {
         statisticsIndicator->setCurrentIndex(appSettings->favoriteStatistic());
-    }
-    else {
+    } else {
         statisticsIndicator->setCurrentIndex(0);
     }
 
@@ -1251,7 +1392,7 @@ void MainWindow::setupStatusBar()
 
     rightWidget->setContentsMargins(0, 0, 0, 0);
     statusBarLayout->addWidget(rightWidget, 1, 2, 1, 1, Qt::AlignRight);
-    
+
     QWidget *container = new QWidget(this);
     container->setObjectName("statusBarWidgetContainer");
     container->setLayout(statusBarLayout);
@@ -1301,25 +1442,16 @@ void MainWindow::setupSidebar()
     outlineWidget = new OutlineWidget(editor, this);
     outlineWidget->setAlternatingRowColors(false);
 
-    documentStats = new DocumentStatistics((MarkdownDocument *) editor->document(), this);
-    connect(documentStats, &DocumentStatistics::wordCountChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setWordCount);
-    connect(documentStats, &DocumentStatistics::characterCountChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setCharacterCount);
-    connect(documentStats, &DocumentStatistics::sentenceCountChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setSentenceCount);
-    connect(documentStats, &DocumentStatistics::paragraphCountChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setParagraphCount);
-    connect(documentStats, &DocumentStatistics::pageCountChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setPageCount);
-    connect(documentStats, &DocumentStatistics::complexWordsChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setComplexWords);
-    connect(documentStats, &DocumentStatistics::readingTimeChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setReadingTime);
-    connect(documentStats, &DocumentStatistics::lixReadingEaseChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setLixReadingEase);
-    connect(documentStats, &DocumentStatistics::readabilityIndexChanged,
-            documentStatsWidget, &DocumentStatisticsWidget::setReadabilityIndex);
+    documentStats = new DocumentStatistics((MarkdownDocument *)editor->document(), this);
+    connect(documentStats, &DocumentStatistics::wordCountChanged, documentStatsWidget, &DocumentStatisticsWidget::setWordCount);
+    connect(documentStats, &DocumentStatistics::characterCountChanged, documentStatsWidget, &DocumentStatisticsWidget::setCharacterCount);
+    connect(documentStats, &DocumentStatistics::sentenceCountChanged, documentStatsWidget, &DocumentStatisticsWidget::setSentenceCount);
+    connect(documentStats, &DocumentStatistics::paragraphCountChanged, documentStatsWidget, &DocumentStatisticsWidget::setParagraphCount);
+    connect(documentStats, &DocumentStatistics::pageCountChanged, documentStatsWidget, &DocumentStatisticsWidget::setPageCount);
+    connect(documentStats, &DocumentStatistics::complexWordsChanged, documentStatsWidget, &DocumentStatisticsWidget::setComplexWords);
+    connect(documentStats, &DocumentStatistics::readingTimeChanged, documentStatsWidget, &DocumentStatisticsWidget::setReadingTime);
+    connect(documentStats, &DocumentStatistics::lixReadingEaseChanged, documentStatsWidget, &DocumentStatisticsWidget::setLixReadingEase);
+    connect(documentStats, &DocumentStatistics::readabilityIndexChanged, documentStatsWidget, &DocumentStatisticsWidget::setReadabilityIndex);
     connect(editor, &MarkdownEditor::textSelected, documentStats, &DocumentStatistics::onTextSelected);
     connect(editor, &MarkdownEditor::textDeselected, documentStats, &DocumentStatistics::onTextDeselected);
 
@@ -1348,7 +1480,7 @@ void MainWindow::setupSidebar()
     int tabIndex = QSettings().value("sidebarCurrentTab", (int)FirstSidebarTab).toInt();
 
     if ((tabIndex < 0) || (tabIndex >= sidebar->tabCount())) {
-        tabIndex = (int) FirstSidebarTab;
+        tabIndex = (int)FirstSidebarTab;
     }
 
     sidebar->setCurrentTabIndex(tabIndex);
@@ -1390,18 +1522,20 @@ void MainWindow::adjustEditor()
     int width = this->width();
     int sidebarWidth = 0;
 
-    // Make sure live preview does not crowd out editor.
-    // It should not take up more than 50% of the window space
-    // left after the sidebar is accounted for.
-    //
-    if (sidebar->isVisible()) {
+    if (sidebar && sidebar->isVisible()) {
         sidebarWidth = sidebar->width();
     }
 
-    htmlPreview->setMaximumWidth((width - sidebarWidth) / 2);
+    if (htmlPreview) {
+        htmlPreview->setMaximumWidth((width - sidebarWidth) / 2);
+    }
 
     // Resize the editor's margins.
     editor->setupPaperMargins();
+
+    if (m_readView) {
+        m_readView->setColumnMargins(editor->columnMargins());
+    }
 
     // Scroll to cursor position.
     editor->centerCursor();
@@ -1409,15 +1543,8 @@ void MainWindow::adjustEditor()
 
 void MainWindow::applyTheme()
 {
-    if (!theme.name().isNull() && !theme.name().isEmpty()) {
-        appSettings->setThemeName(theme.name());
-    }
-
-    ColorScheme colorScheme = theme.lightColorScheme();
-
-    if (appSettings->darkModeEnabled()) {
-        colorScheme = theme.darkColorScheme();
-    }
+    const MarginTheme marginTheme = currentMarginTheme();
+    const ColorScheme colorScheme = marginColorScheme(marginTheme);
 
     ChromeColors chromeColors(colorScheme);
 
@@ -1440,6 +1567,29 @@ void MainWindow::applyTheme()
 
     editor->setColorScheme(colorScheme);
     spelling->setErrorColor(colorScheme.error);
+    if (m_topEdgeBar) {
+        m_topEdgeBar->applyTheme(marginTheme);
+    }
+    if (m_bottomEdgeBar) {
+        m_bottomEdgeBar->applyTheme(marginTheme);
+        m_bottomEdgeBar->setDarkMode(marginIsDark(m_colorMode));
+    }
+    if (m_readView) {
+        m_readView->applyTheme(marginTheme, editor->font());
+    }
+    if (m_shortcutsPanel) {
+        m_shortcutsPanel->applyTheme(marginTheme);
+    }
+    appAction(AppActions::DarkMode)->setChecked(marginIsDark(m_colorMode));
+
+    QPalette palette = qApp->palette();
+    palette.setColor(QPalette::Window, colorScheme.background);
+    palette.setColor(QPalette::Base, colorScheme.background);
+    palette.setColor(QPalette::Text, colorScheme.foreground);
+    palette.setColor(QPalette::WindowText, colorScheme.foreground);
+    palette.setColor(QPalette::Highlight, colorScheme.selection);
+    palette.setColor(QPalette::HighlightedText, colorScheme.foreground);
+    qApp->setPalette(palette);
 
     // Do not call MainWindow::setStyleSheet().  Calling it more than once
     // (i.e., when changing a theme) causes a crash in Qt 5.11.  Instead,
@@ -1457,12 +1607,12 @@ void MainWindow::applyTheme()
         qApp->style()->polish(this);
     }
 
-    styleSheet = styler.htmlPreviewStyleSheet();
+    if (htmlPreview) {
+        styleSheet = styler.htmlPreviewStyleSheet();
 
-    if (styleSheet.isNull()) {
-        qCritical() << "Invalid HTML preview style sheet provided.";
-    } else {
-        htmlPreview->setStyleSheet(styler.htmlPreviewStyleSheet());
+        if (!styleSheet.isNull()) {
+            htmlPreview->setStyleSheet(styleSheet);
+        }
     }
 
     adjustEditor();
@@ -1474,6 +1624,154 @@ void MainWindow::runSpellCheck()
     connect(dialog, &SpellCheckDialog::finished, spelling, &SpellCheckDecorator::rehighlight);
 
     dialog->show();
+}
+
+void MainWindow::setupFramelessWindow()
+{
+    setAttribute(Qt::WA_DontCreateNativeAncestors);
+
+    m_windowAgent = new QWK::WidgetWindowAgent(this);
+    m_windowAgent->setup(this);
+
+    m_topEdgeBar = new TopEdgeBar(this);
+    m_topEdgeBar->applyTheme(currentMarginTheme());
+    m_windowAgent->setTitleBar(m_topEdgeBar);
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Minimize, m_topEdgeBar->minimizeButton());
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Maximize, m_topEdgeBar->maximizeButton());
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Close, m_topEdgeBar->closeButton());
+
+    connect(m_topEdgeBar->minimizeButton(), &QToolButton::clicked, this, &MainWindow::showMinimized);
+    connect(m_topEdgeBar->maximizeButton(), &QToolButton::clicked, this, [this]() {
+        isMaximized() ? showNormal() : showMaximized();
+    });
+    connect(m_topEdgeBar->closeButton(), &QToolButton::clicked, this, &MainWindow::close);
+
+    setupBottomEdgeBar();
+    placeEdgeBars();
+    updatePageTitle();
+}
+
+void MainWindow::setupBottomEdgeBar()
+{
+    m_bottomEdgeBar = new BottomEdgeBar(this);
+    m_bottomEdgeBar->applyTheme(currentMarginTheme());
+    m_bottomEdgeBar->setDarkMode(marginIsDark(m_colorMode));
+    m_windowAgent->setHitTestVisible(m_bottomEdgeBar, true);
+
+    m_bottomEdgeBar->setFocusModeIcon(secondaryIconTheme->icon("distraction-free-mode"));
+    connect(m_bottomEdgeBar, &BottomEdgeBar::focusModeToggled, this, [this]() {
+        appAction(AppActions::DistractionFreeMode)->trigger();
+    });
+    connect(m_bottomEdgeBar, &BottomEdgeBar::renderedViewToggled, this, [this]() {
+        appAction(AppActions::Preview)->trigger();
+    });
+    connect(m_bottomEdgeBar, &BottomEdgeBar::darkModeToggled, this, [this]() {
+        appAction(AppActions::DarkMode)->trigger();
+    });
+}
+
+void MainWindow::toggleReadView(bool rendered)
+{
+    if (rendered) {
+        m_readView->applyTheme(currentMarginTheme(), editor->font());
+        m_readView->showMarkdown(editor->toPlainText());
+        m_readView->setColumnMargins(editor->columnMargins());
+        m_pages->setCurrentWidget(m_readView);
+        m_readView->setFocus();
+    } else {
+        m_pages->setCurrentWidget(editor);
+        editor->setFocus();
+    }
+
+    m_bottomEdgeBar->setRenderedView(rendered);
+}
+
+void MainWindow::placeEdgeBars()
+{
+    constexpr int topBarHeight = 40;
+    constexpr int bottomBarHeight = 44;
+
+    if (m_topEdgeBar) {
+        m_topEdgeBar->setGeometry(0, 0, width(), topBarHeight);
+        m_topEdgeBar->raise();
+    }
+
+    if (m_bottomEdgeBar) {
+        m_bottomEdgeBar->setGeometry(0, height() - bottomBarHeight, width(), bottomBarHeight);
+        m_bottomEdgeBar->raise();
+    }
+
+    if (m_shortcutsPanel && m_shortcutsPanel->isVisible()) {
+        placeShortcutsPanel();
+        m_shortcutsPanel->raise();
+    }
+}
+
+void MainWindow::updateEdgeBarsForPointer(const QPoint &windowPos)
+{
+    constexpr int topZone = 40;
+    constexpr int bottomZone = 44;
+
+    if (!m_topEdgeBar || !m_bottomEdgeBar) {
+        return;
+    }
+
+    const bool canReveal = isActiveWindow() && !m_suppressEdgeBars;
+    const bool inTopZone = windowPos.y() <= topZone;
+    const bool inBottomZone = windowPos.y() >= height() - bottomZone;
+
+    if (canReveal && inTopZone) {
+        m_topEdgeBar->fadeIn();
+    } else {
+        m_topEdgeBar->fadeOut();
+    }
+
+    if (canReveal && inBottomZone) {
+        m_bottomEdgeBar->fadeIn();
+    } else {
+        m_bottomEdgeBar->fadeOut();
+    }
+}
+
+void MainWindow::hideEdgeBars()
+{
+    if (m_topEdgeBar) {
+        m_topEdgeBar->fadeOut();
+    }
+
+    if (m_bottomEdgeBar) {
+        m_bottomEdgeBar->fadeOut();
+    }
+}
+
+void MainWindow::updatePageTitle()
+{
+    if (m_topEdgeBar) {
+        m_topEdgeBar->setDocumentTitle(pageTitle());
+    }
+}
+
+QString MainWindow::pageTitle() const
+{
+    const QString path = documentManager->document()->filePath();
+
+    if (!path.isEmpty()) {
+        return QFileInfo(path).completeBaseName();
+    }
+
+    const QRegularExpression heading(QStringLiteral("^#\\s+(\\S.*)$"), QRegularExpression::MultilineOption);
+    const QRegularExpressionMatch match = heading.match(editor->toPlainText());
+
+    if (match.hasMatch()) {
+        return match.captured(1).trimmed();
+    }
+
+    return tr("Untitled");
+}
+
+MarginTheme MainWindow::currentMarginTheme() const
+{
+    return marginIsDark(m_colorMode) ? MarginTheme::dark() : MarginTheme::light();
 }
 
 } // namespace ghostwriter

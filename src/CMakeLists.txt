@@ -70,6 +70,12 @@ target_sources(ghostwriter PRIVATE
     library.cpp
     logging.cpp
     mainwindow.cpp
+    margin/bottomedgebar.cpp
+    margin/fadingbar.cpp
+    margin/margintheme.cpp
+    margin/readview.cpp
+    margin/shortcutspanel.cpp
+    margin/topedgebar.cpp
     messageboxhelper.cpp
     outlinewidget.cpp
     sidebar.cpp
@@ -127,8 +133,15 @@ target_link_libraries(ghostwriter PRIVATE
     KF${KF_MAJOR_VERSION}::SonnetCore
     KF${KF_MAJOR_VERSION}::SonnetUi
     KF${KF_MAJOR_VERSION}::XmlGui
+    QWindowKit::Widgets
     ${CMARK_LIBS}
 )
+
+if (MSVC)
+    install(TARGETS libcmark-gfm libcmark-gfm-extensions
+        RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
+    )
+endif()
 
 set_target_properties(ghostwriter PROPERTIES
     WIN32_EXECUTABLE ON

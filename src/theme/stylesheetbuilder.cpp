@@ -8,14 +8,13 @@
 
 #include <QApplication>
 #include <QColor>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QPalette>
 #include <QRegularExpression>
-#include <QTextStream>
-#include <QDebug>
-#include <QRegularExpression>
 #include <QTemporaryFile>
+#include <QTextStream>
 #include <QVariant>
 
 #include "chromecolors.h"
@@ -49,9 +48,15 @@ StyleSheetBuilder::StyleSheetBuilder(const ChromeColors &colors,
     m_styleSheetVariables["$editor-font-family"] = sanitizeFontFamily(editorFont);
     m_styleSheetVariables["$body-font-family"] = sanitizeFontFamily(previewTextFont);
     m_styleSheetVariables["$code-font-family"] = sanitizeFontFamily(previewCodeFont);
-    m_styleSheetVariables["$editor-font-size"] = QString("%1pt").arg(editorFont.pointSize());
-    m_styleSheetVariables["$body-font-size"] = QString("%1pt").arg(previewTextFont.pointSize());
-    m_styleSheetVariables["$code-font-size"] = QString("%1pt").arg(previewCodeFont.pointSize());
+    const auto fontSize = [](const QFont &font) {
+        if (font.pixelSize() > 0) {
+            return QString("%1px").arg(font.pixelSize());
+        }
+        return QString("%1pt").arg(font.pointSize());
+    };
+    m_styleSheetVariables["$editor-font-size"] = fontSize(editorFont);
+    m_styleSheetVariables["$body-font-size"] = fontSize(previewTextFont);
+    m_styleSheetVariables["$code-font-size"] = fontSize(previewCodeFont);
 
     if (roundedCorners) {
         m_styleSheetVariables["$scrollbar-border-radius"] = "3px";
@@ -136,24 +141,24 @@ QString StyleSheetBuilder::htmlPreviewStyleSheet()
     return compileStyleSheet(":/resources/preview.css");
 }
 
-QString StyleSheetBuilder::stringValueOf(const QString &variableName) const {
+QString StyleSheetBuilder::stringValueOf(const QString &variableName) const
+{
     QVariant value = m_styleSheetVariables.value(variableName);
 
     if (!value.isValid()) {
-        qCritical() << "Undefined variable"
-                    << variableName << "in style sheet";
+        qCritical() << "Undefined variable" << variableName << "in style sheet";
         return QString();
     }
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-    if (QMetaType::QString == (QMetaType::Type) value.type()) {
+    if (QMetaType::QString == (QMetaType::Type)value.type()) {
 #else
     if (QMetaType::QString == value.typeId()) {
 #endif
         return value.toString();
     }
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-    else if (QMetaType::QColor == (QMetaType::Type) value.type()) {
+    else if (QMetaType::QColor == (QMetaType::Type)value.type()) {
 #else
     else if (QMetaType::QColor == value.typeId()) {
 #endif
@@ -164,8 +169,7 @@ QString StyleSheetBuilder::stringValueOf(const QString &variableName) const {
         } else {
             return color.name(QColor::HexRgb);
         }
-    }
-    else {
+    } else {
         qCritical() << "Invalid variable type used for" << variableName;
         return QString();
     }
@@ -192,12 +196,10 @@ QString StyleSheetBuilder::compileStyleSheet(const QString &path) const
 
         if (variable.isNull() && ('$' == ch)) {
             variable = ch;
-        }
-        else if (!variable.isNull()) {
+        } else if (!variable.isNull()) {
             if (ch.isLetterOrNumber() || ('-' == ch) || ('_' == ch)) {
                 variable += ch;
-            }
-            else {
+            } else {
                 QString value = stringValueOf(variable);
 
                 if (value.isNull()) {
@@ -208,8 +210,7 @@ QString StyleSheetBuilder::compileStyleSheet(const QString &path) const
                 out << ch;
                 variable = QString();
             }
-        }
-        else {
+        } else {
             out << ch;
         }
     }

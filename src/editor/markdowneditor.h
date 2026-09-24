@@ -7,9 +7,9 @@
 #ifndef MARKDOWN_EDITOR_H
 #define MARKDOWN_EDITOR_H
 
-#include <QSyntaxHighlighter>
 #include <QPlainTextEdit>
 #include <QScopedPointer>
+#include <QSyntaxHighlighter>
 
 #include "colorscheme.h"
 #include "markdowndocument.h"
@@ -30,12 +30,7 @@ public:
     /**
      * Constructor.
      */
-    MarkdownEditor
-    (
-        MarkdownDocument *textDocument,
-        const ColorScheme &colors,
-        QWidget *parent = nullptr
-    );
+    MarkdownEditor(MarkdownDocument *textDocument, const ColorScheme &colors, QWidget *parent = nullptr);
 
     /**
      * Destructor.
@@ -59,7 +54,7 @@ public:
      * Overrides setPlainText() to ensure the Markdown parser is invoked
      * only once and not for each text change as the full document text
      * is loaded.
-    */
+     */
     void setPlainText(const QString &text);
 
     /**
@@ -101,6 +96,7 @@ public:
      * Sets the font.
      */
     void setFont(const QString &family, double size);
+    void setWritingFont(const QFont &font);
 
     /**
      * Sets whether tabs and spaces will be shown.
@@ -124,6 +120,11 @@ public:
      * calls to setEditorWidth().
      */
     void setupPaperMargins();
+
+    /**
+     * Returns the margins around the centered text column.
+     */
+    QMargins columnMargins() const;
 
     /**
      * Implements virtual method to ensure IME windows are positioned correctly
@@ -195,12 +196,7 @@ signals:
      * well as the cursor position of the beginning and end of the
      * selection in the document, are provided as parameters.
      */
-    void textSelected
-    (
-        const QString &selectedText,
-        int selectionStart,
-        int selectionEnd
-    );
+    void textSelected(const QString &selectedText, int selectionStart, int selectionEnd);
 
     /**
      * Emitted when the user deselects text (i.e., no text is currently
