@@ -223,7 +223,7 @@ AppActions::AppActions(KActionCollection *collection, SvgIconTheme *iconTheme, Q
         tr("Hemingway mode disables the backspace and delete keys to help you "
            "resist the temptation to edit your document as you write."));
 
-    action = d->addCheckAction(DarkMode, "view_dark_mode", tr("Dark Mode"), "dark-mode");
+    action = d->addCheckAction(DarkMode, "view_dark_mode", tr("Dark Mode"), "dark-mode", tr("CTRL+SHIFT+L"));
     action->setToolTip(tr("Enables/disables the current theme's dark color scheme."));
     action->setWhatsThis(
         tr("<p>Enables/disables the current theme's dark color scheme.</p>"

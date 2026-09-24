@@ -15,6 +15,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStringLiteral>
 #include <QToolButton>
 
@@ -39,9 +40,19 @@
 #include "documentmanager.h"
 #include "findreplace.h"
 #include "folderviewwidget.h"
+#include "margin/bottomedgebar.h"
+#include "margin/margintheme.h"
+#include "margin/readview.h"
+#include "margin/shortcutspanel.h"
+#include "margin/topedgebar.h"
 #include "outlinewidget.h"
 #include "sidebar.h"
 #include "timelabel.h"
+
+namespace QWK
+{
+class WidgetWindowAgent;
+}
 
 namespace ghostwriter
 {
@@ -57,8 +68,10 @@ public:
     virtual ~MainWindow();
 
 protected:
-    QSize sizeHint() const  override;
+    QSize sizeHint() const override;
     void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void changeEvent(QEvent *event) override;
     void keyPressEvent(QKeyEvent *e) override;
     bool eventFilter(QObject *obj, QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
@@ -100,7 +113,7 @@ private slots:
 private:
     MarkdownEditor *editor;
     SpellCheckDecorator *spelling;
-    FindReplace* findReplace;
+    FindReplace *findReplace;
     QSplitter *previewSplitter;
     QSplitter *splitter;
     DocumentManager *documentManager;
@@ -136,6 +149,17 @@ private:
 
     KHelpMenu *m_helpMenu;
 
+    TopEdgeBar *m_topEdgeBar = nullptr;
+    BottomEdgeBar *m_bottomEdgeBar = nullptr;
+    ReadView *m_readView = nullptr;
+    ShortcutsPanel *m_shortcutsPanel = nullptr;
+    QAction *m_toggleFontAction = nullptr;
+    QStackedWidget *m_pages = nullptr;
+    QWK::WidgetWindowAgent *m_windowAgent = nullptr;
+    MarginColorMode m_colorMode = MarginColorMode::System;
+    bool m_suppressEdgeBars = false;
+    bool m_useSansFont = false;
+
     KActionCollection *actionCollection() const;
 
     QMenu *addMenuBarMenu(const QString &name);
@@ -143,6 +167,20 @@ private:
     QAction *appAction(AppActions::ActionType actionType) const;
 
     void loadTheme();
+    void setupFramelessWindow();
+    void setupBottomEdgeBar();
+    void applyWritingFont();
+    void toggleWritingFont();
+    void toggleReadView(bool rendered);
+    void setupShortcutsPanel();
+    void toggleShortcutsPanel();
+    void placeShortcutsPanel();
+    void placeEdgeBars();
+    void updateEdgeBarsForPointer(const QPoint &windowPos);
+    void hideEdgeBars();
+    void updatePageTitle();
+    QString pageTitle() const;
+    MarginTheme currentMarginTheme() const;
     void setupActions();
     void setupRecentFileActions(const BookmarkList &recentFiles);
     void setupGui();

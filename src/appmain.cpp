@@ -9,6 +9,8 @@
 #include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
+#include <QFontDatabase>
+#include <QGuiApplication>
 #include <QLibraryInfo>
 #include <QLocale>
 #include <QTranslator>
@@ -53,6 +55,16 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseSoftwareOpenGL);
     }
 
+    QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+
+#if defined(Q_OS_WIN)
+    // The default Windows font engine snaps glyphs to the pixel grid, which
+    // looks jagged at fractional display scaling.  FreeType keeps outlines smooth.
+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
+        qputenv("QT_QPA_PLATFORM", "windows:fontengine=freetype");
+    }
+#endif
+
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
@@ -82,63 +94,55 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
 
+    const int writingFontId = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Newsreader-Variable.ttf"));
+    const QStringList writingFamilies = QFontDatabase::applicationFontFamilies(writingFontId);
+    app.setProperty("marginWritingFamily", writingFamilies.isEmpty() ? QStringLiteral("Georgia") : writingFamilies.first());
+
     qApp->installEventFilter(KToolTipHelper::instance());
 
 #if defined(Q_OS_LINUX)
     QGuiApplication::setDesktopFileName("ghostwriter");
 #endif
 
-    KAboutData aboutData("ghostwriter",
-                    QCoreApplication::translate("main", "ghostwriter"),
-                    APPVERSION);
+    KAboutData aboutData("ghostwriter", QCoreApplication::translate("main", "ghostwriter"), APPVERSION);
 
     aboutData.setOrganizationDomain("kde.org");
-    aboutData.setShortDescription(QCoreApplication::translate("main",
-        "A markdown editor"));
+    aboutData.setShortDescription(QCoreApplication::translate("main", "A markdown editor"));
 
     aboutData.setOtherText("<img src=\":/resources/banner.png\">");
-    aboutData.addAuthor("Megan Conkle", "Developer",
-        "megan.conkle@kdemail.net");
+    aboutData.addAuthor("Megan Conkle", "Developer", "megan.conkle@kdemail.net");
     aboutData.addCredit("Graeme Gott",
-        QCoreApplication::translate("main",
-            "FocusWriter developer, whose Qt code mentored me"),
-        "graeme@gottcode.org",
-        "gottcode.org");
+                        QCoreApplication::translate("main", "FocusWriter developer, whose Qt code mentored me"),
+                        "graeme@gottcode.org",
+                        "gottcode.org");
     aboutData.addCredit("Dmitry Shachnev",
-        QCoreApplication::translate("main",
-            "ReText developer, whose algorithms helped immensely"),
-        QString(),
-        "https://github.com/retext-project/retext");
+                        QCoreApplication::translate("main", "ReText developer, whose algorithms helped immensely"),
+                        QString(),
+                        "https://github.com/retext-project/retext");
     aboutData.addCredit("Gabriel M. Beddingfield",
-        QCoreApplication::translate("main",
-            "StretchPlayer developer, whose application showed me how to make frameless windows in Qt"),
-        QString(),
-        "https://www.teuton.org/~gabriel/stretchplayer/");
+                        QCoreApplication::translate("main", "StretchPlayer developer, whose application showed me how to make frameless windows in Qt"),
+                        QString(),
+                        "https://www.teuton.org/~gabriel/stretchplayer/");
     aboutData.addCredit("Wolf Vollprecht",
-        QCoreApplication::translate("main",
-            "UberWriter (now Apostrophe) developer, for providing inspiration"),
-        QString(),
-        "https://www.wolfvollprecht.de");
+                        QCoreApplication::translate("main", "UberWriter (now Apostrophe) developer, for providing inspiration"),
+                        QString(),
+                        "https://www.wolfvollprecht.de");
     aboutData.addCredit(QCoreApplication::translate("main", "Other Contributors"),
-        QCoreApplication::translate("main",
-            "Everyone who provided translations, documentation, bug fixes, or new features over the years"),
-        QString(),
-        QString());
-    aboutData.addComponent("cmark-gfm", 
-        QCoreApplication::translate("main",
-            "An extended version of the C reference implementation of CommonMark"),
-        QString(),
-        "https://github.com/github/cmark-gfm");
+                        QCoreApplication::translate("main", "Everyone who provided translations, documentation, bug fixes, or new features over the years"),
+                        QString(),
+                        QString());
+    aboutData.addComponent("cmark-gfm",
+                           QCoreApplication::translate("main", "An extended version of the C reference implementation of CommonMark"),
+                           QString(),
+                           "https://github.com/github/cmark-gfm");
     aboutData.addComponent("React", QCoreApplication::translate("main", "A JavaScript library for building user interfaces"), QString(), "https://reactjs.org");
-    aboutData.addComponent("MathJax", 
-        QCoreApplication::translate("main",
-            "A JavaScript display engine for mathematics"),
-        QString(),
-        "https://www.mathjax.org/");
+    aboutData.addComponent("MathJax",
+                           QCoreApplication::translate("main", "A JavaScript display engine for mathematics"),
+                           QString(),
+                           "https://www.mathjax.org/");
     aboutData.setLicense(KAboutLicense::GPL_V3);
-    aboutData.setCopyrightStatement(QCoreApplication::translate("main",
-        "Copyright 2014-%1 The ghostwriter team")
-            .arg(QDateTime::currentDateTime().date().year()));
+    aboutData.setCopyrightStatement(
+        QCoreApplication::translate("main", "Copyright 2014-%1 The ghostwriter team").arg(QDateTime::currentDateTime().date().year()));
     aboutData.setHomepage("https://ghostwriter.kde.org");
     aboutData.setDesktopFileName("org.kde.ghostwriter");
 
@@ -154,13 +158,10 @@ int main(int argc, char *argv[])
 
     QCommandLineParser clParser;
     aboutData.setupCommandLine(&clParser);
-    clParser.setApplicationDescription(QCoreApplication::translate("main",
-        "Welcome to ghostwriter!"));
-    clParser.addPositionalArgument("file",
-        QCoreApplication::translate("main", "(Optional) File to open."));
+    clParser.setApplicationDescription(QCoreApplication::translate("main", "Welcome to ghostwriter!"));
+    clParser.addPositionalArgument("file", QCoreApplication::translate("main", "(Optional) File to open."));
 
-    QCommandLineOption renderingOption("disable-gpu",
-        QCoreApplication::translate("main", "Disables GPU acceleration."));
+    QCommandLineOption renderingOption("disable-gpu", QCoreApplication::translate("main", "Disables GPU acceleration."));
 
     clParser.addOption(renderingOption);
     clParser.process(app);

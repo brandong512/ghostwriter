@@ -4,6 +4,7 @@
         <file>resources/preview.html</file>
         <file>resources/widgets.qss</file>
         <file>resources/banner.png</file>
+        <file alias="fonts/Newsreader-Variable.ttf">resources/fonts/Newsreader-Variable.ttf</file>
         <file>3rdparty/react/react-dom.production.min.js</file>
         <file>3rdparty/react/react.production.min.js</file>
         <file>3rdparty/react/html-react-parser.js</file>
