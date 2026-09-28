@@ -35,6 +35,10 @@ public:
     static const int MAX_TAB_WIDTH = 8;
     static const int DEFAULT_TAB_WIDTH = 4;
 
+    static const int MIN_HEADING_SIZE_STEP = 0;
+    static const int MAX_HEADING_SIZE_STEP = 8;
+    static const int DEFAULT_HEADING_SIZE_STEP = 1;
+
     static AppSettings *instance();
     ~AppSettings();
 
@@ -81,6 +85,10 @@ public:
     bool largeHeadingSizesEnabled() const;
     Q_SLOT void setLargeHeadingSizesEnabled(bool enabled);
     Q_SIGNAL void largeHeadingSizesChanged(bool enabled);
+
+    int headingSizeStep() const;
+    Q_SLOT void setHeadingSizeStep(int sizeStep);
+    Q_SIGNAL void headingSizeStepChanged(int sizeStep);
 
     bool autoMatchEnabled() const;
     Q_SLOT void setAutoMatchEnabled(bool enabled);

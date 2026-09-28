@@ -320,6 +320,11 @@ public slots:
     void setEnableLargeHeadingSizes(bool enable);
 
     /**
+     * Sets how many size units each heading level grows by.
+     */
+    void setHeadingSizeStep(int sizeStep);
+
+    /**
      * Sets whether automatching of characters is enabled.
      */
     void setAutoMatchEnabled(bool enable);

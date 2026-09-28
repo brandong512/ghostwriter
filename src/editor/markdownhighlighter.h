@@ -64,6 +64,12 @@ public:
     void setEnableLargeHeadingSizes(const bool enable);
 
     /**
+     * Sets how many size units each heading level grows by.
+     * A level-1 heading grows by six times this step.
+     */
+    void setHeadingSizeStep(int sizeStep);
+
+    /**
      * Sets whether emphasized text is underlined instead of italicized.
      */
     void setUseUnderlineForEmphasis(const bool enable);

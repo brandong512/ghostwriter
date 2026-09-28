@@ -35,6 +35,7 @@ constexpr auto GW_AUTOSAVE_KEY{"Save/autoSave"};
 constexpr auto GW_BACKUP_FILE_KEY{"Save/backupFile"};
 constexpr auto GW_EDITOR_FONT_KEY{"Style/editorFont"};
 constexpr auto GW_LARGE_HEADINGS_KEY{"Style/largeHeadings"};
+constexpr auto GW_HEADING_SIZE_STEP_KEY{"Style/headingSizeStep"};
 constexpr auto GW_AUTO_MATCH_KEY{"Typing/autoMatchEnabled"};
 constexpr auto GW_AUTO_MATCH_FILTER_KEY{"Typing/autoMatchFilter"};
 constexpr auto GW_BULLET_CYCLING_KEY{"Typing/bulletPointCyclingEnabled"};
@@ -96,6 +97,7 @@ public:
     bool sidebarVisible;
     bool insertSpacesForTabsEnabled;
     bool largeHeadingSizesEnabled;
+    int headingSizeStep;
     bool liveSpellCheckEnabled;
     bool useUnderlineForEmphasis;
     EditorWidth editorWidth;
@@ -153,6 +155,7 @@ void AppSettings::store()
     appSettings.setValue(constants::GW_INTERFACE_STYLE_KEY, QVariant(d->interfaceStyle));
     appSettings.setValue(constants::GW_BLOCKQUOTE_STYLE_KEY, QVariant(d->italicizeBlockquotes));
     appSettings.setValue(constants::GW_LARGE_HEADINGS_KEY, QVariant(d->largeHeadingSizesEnabled));
+    appSettings.setValue(constants::GW_HEADING_SIZE_STEP_KEY, QVariant(d->headingSizeStep));
     appSettings.setValue(constants::GW_SIDEBAR_OPEN_KEY, QVariant(d->sidebarVisible));
     appSettings.setValue(constants::GW_HTML_PREVIEW_OPEN_KEY, QVariant(d->htmlPreviewVisible));
     appSettings.setValue(constants::GW_LAST_USED_EXPORTER_KEY, QVariant(d->currentHtmlExporter->name()));
@@ -337,6 +340,31 @@ void AppSettings::setLargeHeadingSizesEnabled(bool enabled)
     
     d->largeHeadingSizesEnabled = enabled;
     emit largeHeadingSizesChanged(enabled);
+}
+
+int AppSettings::headingSizeStep() const
+{
+    Q_D(const AppSettings);
+
+    return d->headingSizeStep;
+}
+
+void AppSettings::setHeadingSizeStep(int sizeStep)
+{
+    Q_D(AppSettings);
+
+    if (sizeStep < MIN_HEADING_SIZE_STEP) {
+        sizeStep = MIN_HEADING_SIZE_STEP;
+    } else if (sizeStep > MAX_HEADING_SIZE_STEP) {
+        sizeStep = MAX_HEADING_SIZE_STEP;
+    }
+
+    if (d->headingSizeStep == sizeStep) {
+        return;
+    }
+
+    d->headingSizeStep = sizeStep;
+    emit headingSizeStepChanged(sizeStep);
 }
 
 bool AppSettings::autoMatchEnabled() const
@@ -826,6 +854,11 @@ AppSettings::AppSettings()
     d->insertSpacesForTabsEnabled = appSettings.value(constants::GW_SPACES_FOR_TABS_KEY, QVariant(false)).toBool();
     d->useUnderlineForEmphasis = appSettings.value(constants::GW_UNDERLINE_ITALICS_KEY, QVariant(false)).toBool();
     d->largeHeadingSizesEnabled = appSettings.value(constants::GW_LARGE_HEADINGS_KEY, QVariant(true)).toBool();
+    d->headingSizeStep = appSettings.value(constants::GW_HEADING_SIZE_STEP_KEY, QVariant(DEFAULT_HEADING_SIZE_STEP)).toInt();
+
+    if ((d->headingSizeStep < MIN_HEADING_SIZE_STEP) || (d->headingSizeStep > MAX_HEADING_SIZE_STEP)) {
+        d->headingSizeStep = DEFAULT_HEADING_SIZE_STEP;
+    }
     d->autoMatchEnabled = appSettings.value(constants::GW_AUTO_MATCH_KEY, QVariant(true)).toBool();
     d->autoMatchedCharFilter = appSettings.value(constants::GW_AUTO_MATCH_FILTER_KEY, QVariant("\"\'([{*_`<")).toString();
     d->bulletPointCyclingEnabled = appSettings.value(constants::GW_BULLET_CYCLING_KEY, QVariant(true)).toBool();

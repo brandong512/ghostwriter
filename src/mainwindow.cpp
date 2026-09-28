@@ -1135,6 +1135,7 @@ void MainWindow::setupGui()
     applyWritingFont();
     editor->setUseUnderlineForEmphasis(appSettings->useUnderlineForEmphasis());
     editor->setEnableLargeHeadingSizes(appSettings->largeHeadingSizesEnabled());
+    editor->setHeadingSizeStep(appSettings->headingSizeStep());
     editor->setAutoMatchEnabled(appSettings->autoMatchEnabled());
     editor->setBulletPointCyclingEnabled(appSettings->bulletPointCyclingEnabled());
     editor->setPlainText("");
@@ -1160,6 +1161,7 @@ void MainWindow::setupGui()
     connect(appSettings, &AppSettings::useUnderlineForEmphasisChanged, editor, &MarkdownEditor::setUseUnderlineForEmphasis);
     connect(appSettings, &AppSettings::italicizeBlockquotesChanged, editor, &MarkdownEditor::setItalicizeBlockquotes);
     connect(appSettings, &AppSettings::largeHeadingSizesChanged, editor, &MarkdownEditor::setEnableLargeHeadingSizes);
+    connect(appSettings, &AppSettings::headingSizeStepChanged, editor, &MarkdownEditor::setHeadingSizeStep);
     connect(appSettings, &AppSettings::autoMatchChanged, editor, QOverload<bool>::of(&MarkdownEditor::setAutoMatchEnabled));
     connect(appSettings, &AppSettings::autoMatchCharChanged, editor, QOverload<QChar, bool>::of(&MarkdownEditor::setAutoMatchEnabled));
     connect(appSettings, &AppSettings::bulletPointCyclingChanged, editor, &MarkdownEditor::setBulletPointCyclingEnabled);

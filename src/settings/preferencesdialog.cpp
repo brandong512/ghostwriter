@@ -273,6 +273,14 @@ void PreferencesDialogPrivate::initializeEditorTab()
     ui->largeHeadingsCheckBox->setChecked(appSettings->largeHeadingSizesEnabled());
     connect(ui->largeHeadingsCheckBox, &QCheckBox::toggled, appSettings, &AppSettings::setLargeHeadingSizesEnabled);
 
+    ui->headingSizeStepInput->setRange(AppSettings::MIN_HEADING_SIZE_STEP, AppSettings::MAX_HEADING_SIZE_STEP);
+    ui->headingSizeStepInput->setValue(appSettings->headingSizeStep());
+    ui->headingSizeStepLabel->setEnabled(appSettings->largeHeadingSizesEnabled());
+    ui->headingSizeStepInput->setEnabled(appSettings->largeHeadingSizesEnabled());
+    connect(ui->largeHeadingsCheckBox, &QCheckBox::toggled, ui->headingSizeStepLabel, &QWidget::setEnabled);
+    connect(ui->largeHeadingsCheckBox, &QCheckBox::toggled, ui->headingSizeStepInput, &QWidget::setEnabled);
+    connect(ui->headingSizeStepInput, QOverload<int>::of(&QSpinBox::valueChanged), appSettings, &AppSettings::setHeadingSizeStep);
+
     ui->cycleBulletPointsCheckBox->setChecked(appSettings->bulletPointCyclingEnabled());
     connect(ui->cycleBulletPointsCheckBox, &QCheckBox::toggled, appSettings, &AppSettings::setBulletPointCyclingEnabled);
 

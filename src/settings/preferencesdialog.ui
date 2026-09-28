@@ -329,11 +329,54 @@
            </layout>
           </item>
           <item>
-           <widget class="QCheckBox" name="largeHeadingsCheckBox">
-            <property name="text">
-             <string>&amp;Use large headings</string>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="headingSizeLayout">
+            <item>
+             <widget class="QCheckBox" name="largeHeadingsCheckBox">
+              <property name="text">
+               <string>&amp;Use large headings</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="headingSizeStepLabel">
+              <property name="text">
+               <string>Size step</string>
+              </property>
+              <property name="buddy">
+               <cstring>headingSizeStepInput</cstring>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="headingSizeStepInput">
+              <property name="toolTip">
+               <string>Extra size added for each heading level. A level-1 heading grows by six times this value. Zero leaves headings the same size as body text.</string>
+              </property>
+              <property name="minimum">
+               <number>0</number>
+              </property>
+              <property name="maximum">
+               <number>8</number>
+              </property>
+              <property name="value">
+               <number>1</number>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="headingSizeSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
           </item>
           <item>
            <spacer name="verticalSpacer_5">

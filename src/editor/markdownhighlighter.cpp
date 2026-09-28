@@ -30,6 +30,52 @@
 
 namespace ghostwriter
 {
+namespace
+{
+constexpr int smallestHeadingLevel = 6;
+constexpr int defaultHeadingSizeStep = 1;
+
+int headingSizeBump(int headingLevel, int sizeStep)
+{
+    const int levelsAboveBodyText = (smallestHeadingLevel - headingLevel) + 1;
+    return sizeStep * levelsAboveBodyText;
+}
+
+void applyHeadingSizeBump(QTextCharFormat &format, int bump)
+{
+    if (bump <= 0) {
+        return;
+    }
+
+    const int pixelSize = format.intProperty(QTextFormat::FontPixelSize);
+    if (pixelSize > 0) {
+        format.clearProperty(QTextFormat::FontPointSize);
+        format.setProperty(QTextFormat::FontPixelSize, pixelSize + bump);
+        return;
+    }
+
+    const qreal pointSize = format.fontPointSize();
+    if (pointSize > 0) {
+        format.clearProperty(QTextFormat::FontPixelSize);
+        format.setFontPointSize(pointSize + bump);
+    }
+}
+
+void storeOnlyActiveFontSize(QTextCharFormat &format, const QFont &font)
+{
+    if (font.pixelSize() > 0) {
+        format.clearProperty(QTextFormat::FontPointSize);
+        format.setProperty(QTextFormat::FontPixelSize, font.pixelSize());
+        return;
+    }
+
+    if (font.pointSizeF() > 0) {
+        format.clearProperty(QTextFormat::FontPixelSize);
+        format.setFontPointSize(font.pointSizeF());
+    }
+}
+}
+
 class MarkdownHighlighterPrivate
 {
     Q_DISABLE_COPY(MarkdownHighlighterPrivate)
@@ -39,6 +85,8 @@ public:
     MarkdownHighlighterPrivate(MarkdownHighlighter *highlighter)
         : q_ptr(highlighter)
         , inBlockquote(false)
+        , useLargeHeadings(true)
+        , headingSizeStep(defaultHeadingSizeStep)
         , useUnderlineForEmphasis(false)
     {
         ;
@@ -61,6 +109,7 @@ public:
     QRegularExpression referenceDefinitionRegex;
     QRegularExpression inlineHtmlCommentRegex;
     bool useLargeHeadings;
+    int headingSizeStep;
     bool useUnderlineForEmphasis;
     bool italicizeBlockquotes;
 
@@ -219,6 +268,14 @@ void MarkdownHighlighter::setEnableLargeHeadingSizes(const bool enable)
     rehighlight();
 }
 
+void MarkdownHighlighter::setHeadingSizeStep(int sizeStep)
+{
+    Q_D(MarkdownHighlighter);
+
+    d->headingSizeStep = sizeStep;
+    rehighlight();
+}
+
 void MarkdownHighlighter::setUseUnderlineForEmphasis(const bool enable)
 {
     Q_D(MarkdownHighlighter);
@@ -237,16 +294,12 @@ void MarkdownHighlighter::setItalicizeBlockquotes(const bool enable)
 
 void MarkdownHighlighter::setFont(const QString &fontFamily, const double fontSize)
 {
-    Q_D(MarkdownHighlighter);
-
     QFont font;
     font.setFamily(fontFamily);
     font.setWeight(QFont::Normal);
     font.setItalic(false);
     font.setPointSizeF(fontSize);
-    d->defaultFormat.setFont(font);
-
-    rehighlight();
+    setFont(font);
 }
 
 void MarkdownHighlighter::setFont(const QFont &font)
@@ -254,6 +307,7 @@ void MarkdownHighlighter::setFont(const QFont &font)
     Q_D(MarkdownHighlighter);
 
     d->defaultFormat.setFont(font);
+    storeOnlyActiveFontSize(d->defaultFormat, font);
     rehighlight();
 }
 
@@ -344,8 +398,9 @@ void MarkdownHighlighterPrivate::applyFormattingForNode(const MarkdownNode *cons
                 contextFormat.setFontWeight(QFont::DemiBold);
 
                 if (useLargeHeadings) {
-                    format.setFontPointSize(format.fontPointSize() + (qreal)(7 - current->headingLevel()));
-                    contextFormat.setFontPointSize(format.fontPointSize());
+                    const int bump = headingSizeBump(current->headingLevel(), headingSizeStep);
+                    applyHeadingSizeBump(format, bump);
+                    applyHeadingSizeBump(contextFormat, bump);
                 }
 
                 if (inBlockquote) {

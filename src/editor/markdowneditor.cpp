@@ -1500,6 +1500,13 @@ void MarkdownEditor::setEnableLargeHeadingSizes(bool enable)
     d->highlighter->setEnableLargeHeadingSizes(enable);
 }
 
+void MarkdownEditor::setHeadingSizeStep(int sizeStep)
+{
+    Q_D(MarkdownEditor);
+
+    d->highlighter->setHeadingSizeStep(sizeStep);
+}
+
 void MarkdownEditor::setAutoMatchEnabled(bool enable)
 {
     Q_D(MarkdownEditor);
