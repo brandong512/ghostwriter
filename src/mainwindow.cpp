@@ -57,6 +57,7 @@
 #include "findreplace.h"
 #include "library.h"
 #include "mainwindow.h"
+#include "margin/themecrossfade.h"
 #include "messageboxhelper.h"
 
 #define GW_MAIN_WINDOW_GEOMETRY_KEY "Window/mainWindowGeometry"
@@ -178,7 +179,9 @@ MainWindow::MainWindow(const QString &filePath, QWidget *parent)
     });
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this]() {
         if (m_colorMode == MarginColorMode::System) {
-            applyTheme();
+            ThemeCrossfade::run(this, [this]() {
+                applyTheme();
+            });
         }
     });
 
@@ -912,7 +915,9 @@ void MainWindow::setupActions()
     m_actions->connect(AppActions::DarkMode, this, [this](bool enabled) {
         m_colorMode = enabled ? MarginColorMode::Dark : MarginColorMode::Light;
         storeMarginColorMode(m_colorMode);
-        applyTheme();
+        ThemeCrossfade::run(this, [this]() {
+            applyTheme();
+        });
     });
     appAction(AppActions::ShowSidebar)->setChecked(false);
     m_actions->connect(AppActions::ShowSidebar, this, &MainWindow::toggleSidebarVisible);
@@ -979,22 +984,75 @@ void MainWindow::setupActions()
     setupShortcutsPanel();
 }
 
+namespace
+{
+QString labelWithoutMnemonic(const QString &text)
+{
+    QString label;
+    label.reserve(text.size());
+
+    for (int index = 0; index < text.size(); ++index) {
+        if (text.at(index) == QLatin1Char('&') && index + 1 < text.size()) {
+            label.append(text.at(++index));
+            continue;
+        }
+        label.append(text.at(index));
+    }
+
+    return label;
+}
+
+QList<ShortcutsPanel::Entry> shortcutPanelEntries(AppActions *actions, QAction *writingFontAction)
+{
+    QList<ShortcutsPanel::Entry> entries;
+    entries.append({QCoreApplication::translate("MainWindow", "Serif / Sans font"), writingFontAction, {}});
+
+    const struct Section {
+        AppActions::ActionType first;
+        AppActions::ActionType last;
+        const char *title;
+    } sections[] = {
+        {AppActions::New, AppActions::Quit, QT_TR_NOOP("File")},
+        {AppActions::Undo, AppActions::Spelling, QT_TR_NOOP("Edit")},
+        {AppActions::Emphasis, AppActions::TaskComplete, QT_TR_NOOP("Format")},
+        {AppActions::FullScreen, AppActions::ZoomOut, QT_TR_NOOP("View")},
+        {AppActions::ChangeTheme, AppActions::Preferences, QT_TR_NOOP("Settings")},
+        {AppActions::HelpContents, AppActions::AboutKDE, QT_TR_NOOP("Help")},
+    };
+
+    for (const Section &section : sections) {
+        bool headerPending = true;
+
+        for (int index = section.first; index <= section.last; ++index) {
+            const auto type = static_cast<AppActions::ActionType>(index);
+            if (type >= AppActions::OpenRecent001 && type <= AppActions::OpenLeastRecent) {
+                continue;
+            }
+
+            QAction *action = actions->get(type);
+            if (!action || action->shortcut().isEmpty()) {
+                continue;
+            }
+
+            ShortcutsPanel::Entry entry;
+            entry.label = labelWithoutMnemonic(action->text());
+            entry.action = action;
+            if (headerPending) {
+                entry.section = QCoreApplication::translate("MainWindow", section.title);
+                headerPending = false;
+            }
+            entries.append(entry);
+        }
+    }
+
+    return entries;
+}
+}
+
 void MainWindow::setupShortcutsPanel()
 {
     m_shortcutsPanel = new ShortcutsPanel(this);
-    m_shortcutsPanel->setEntries({
-        {tr("Serif / Sans font"), m_toggleFontAction},
-        {tr("Dark / light mode"), appAction(AppActions::DarkMode)},
-        {tr("Focus mode"), appAction(AppActions::DistractionFreeMode)},
-        {tr("Rendered view (Esc to go back)"), appAction(AppActions::Preview)},
-        {tr("Full screen"), appAction(AppActions::FullScreen)},
-        {tr("Bold"), appAction(AppActions::Strong)},
-        {tr("Italic"), appAction(AppActions::Emphasis)},
-        {tr("New"), appAction(AppActions::New)},
-        {tr("Open"), appAction(AppActions::Open)},
-        {tr("Save"), appAction(AppActions::Save)},
-        {tr("Find"), appAction(AppActions::Find)},
-    });
+    m_shortcutsPanel->setEntries(shortcutPanelEntries(m_actions, m_toggleFontAction));
     m_shortcutsPanel->applyTheme(currentMarginTheme());
     m_windowAgent->setHitTestVisible(m_shortcutsPanel, true);
 
@@ -1016,20 +1074,26 @@ void MainWindow::toggleShortcutsPanel()
 void MainWindow::placeShortcutsPanel()
 {
     constexpr int sideGap = 20;
+    constexpr int topBarHeight = 40;
     constexpr int bottomBarHeight = 44;
-    constexpr int gapAboveBar = 4;
+    constexpr int gapAboveBar = 8;
+    constexpr int gapBelowTop = 8;
 
     if (!m_shortcutsPanel) {
         return;
     }
 
-    const QSize size = m_shortcutsPanel->sizeHint();
-    m_shortcutsPanel->setGeometry(width() - size.width() - sideGap, height() - bottomBarHeight - gapAboveBar - size.height(), size.width(), size.height());
+    const int availableHeight = height() - topBarHeight - bottomBarHeight - gapAboveBar - gapBelowTop;
+    const int availableWidth = width() - sideGap * 2;
+    const QSize hint = m_shortcutsPanel->sizeHint();
+    const int panelHeight = qMin(hint.height(), qMax(availableHeight, 0));
+    const int panelWidth = qMin(hint.width(), qMax(availableWidth, 0));
+    m_shortcutsPanel->setGeometry(width() - panelWidth - sideGap, height() - bottomBarHeight - gapAboveBar - panelHeight, panelWidth, panelHeight);
 }
 
 void MainWindow::applyWritingFont()
 {
-    constexpr int serifPixelSize = 20;
+    constexpr int serifPixelSize = 18;
     constexpr int sansPixelSize = 18;
 
     QFont writingFont(m_useSansFont ? QStringLiteral("Segoe UI") : qApp->property("marginWritingFamily").toString());

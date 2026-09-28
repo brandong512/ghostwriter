@@ -14,6 +14,8 @@
 
 class QAction;
 class QGridLayout;
+class QScrollArea;
+class QWidget;
 
 namespace ghostwriter
 {
@@ -28,15 +30,19 @@ class ShortcutsPanel : public QFrame
 public:
     struct Entry {
         QString label;
-        QAction *action;
+        QAction *action = nullptr;
+        QString section;
     };
 
     explicit ShortcutsPanel(QWidget *parent = nullptr);
 
     void setEntries(const QList<Entry> &entries);
     void applyTheme(const MarginTheme &theme);
+    QSize sizeHint() const override;
 
 private:
+    QScrollArea *m_scroll;
+    QWidget *m_content;
     QGridLayout *m_grid;
 };
 

@@ -388,6 +388,9 @@ protected slots:
     void onCursorPositionChanged();
 
 private:
+    void syncInlineImages();
+    void paintInlineImages();
+
     QScopedPointer<MarkdownEditorPrivate> d_ptr;
 };
 } // namespace ghostwriter
