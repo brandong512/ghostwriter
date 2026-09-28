@@ -43,6 +43,8 @@
 #include "../markdown/cmarkgfmapi.h"
 
 #include "actions/inlinemarkuptoggle.h"
+#include "inlineimagecache.h"
+#include "inlineimagelayout.h"
 #include "markdowneditor.h"
 #include "markdownhighlighter.h"
 #include "markdownstates.h"
@@ -55,6 +57,33 @@ namespace
 constexpr auto unbreakableSpace{" "}; // Entity: &nbsp; HTML code: &#160; Unicode: U+00AO
 constexpr auto doubleSpace{"  "};
 constexpr auto unbreakableSpaceIndicator{"_"};
+constexpr auto pastedImageFolderSuffix{"_images"};
+constexpr auto pastedImageTimestampFormat{"yyyyMMdd-HHmmss"};
+constexpr int thumbnailCornerRadius = 8;
+
+QString markdownImageTarget(const QString &path)
+{
+    if (path.contains(QLatin1Char(' '))) {
+        return QStringLiteral("<%1>").arg(path);
+    }
+    return path;
+}
+
+QString pastedImagePath(const QString &documentPath)
+{
+    const QFileInfo documentInfo(documentPath);
+    const QString folderName = documentInfo.completeBaseName() + QLatin1String(pastedImageFolderSuffix);
+    const QString fileName =
+        QStringLiteral("paste-") + QDateTime::currentDateTime().toString(QLatin1String(pastedImageTimestampFormat)) + QStringLiteral(".png");
+    return QDir(documentInfo.dir().filePath(folderName)).filePath(fileName);
+}
+
+bool writePng(const QImage &image, const QString &path)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QImageWriter writer(path, "png");
+    return writer.write(image);
+}
 }
 class MarkdownEditorPrivate
 {
@@ -207,6 +236,11 @@ MarkdownEditor::MarkdownEditor(MarkdownDocument *textDocument, const ColorScheme
     d->loadingDocument = false;
 
     this->setDocument(textDocument);
+    auto *imageCache = new InlineImageCache(textDocument);
+    textDocument->setDocumentLayout(new InlineImageLayout(textDocument, imageCache));
+    connect(textDocument, &MarkdownDocument::filePathChanged, this, [this]() {
+        syncInlineImages();
+    });
     this->setAcceptDrops(true);
 
     d->preferredLayout = new QGridLayout();
@@ -545,6 +579,8 @@ void MarkdownEditor::paintEvent(QPaintEvent *event)
             done = true;
         }
     }
+
+    paintInlineImages();
 }
 
 void MarkdownEditor::setPlainText(const QString &text)
@@ -686,6 +722,7 @@ void MarkdownEditor::setupPaperMargins()
     }
 
     this->setViewportMargins(sideMargin, topMargin, sideMargin, 0);
+    syncInlineImages();
 }
 
 QMargins MarkdownEditor::columnMargins() const
@@ -813,56 +850,93 @@ void MarkdownEditor::insertFromMimeData(const QMimeData *source)
 {
     Q_D(MarkdownEditor);
 
-    if (source->hasImage()) {
-        QImage image = qvariant_cast<QImage>(source->imageData());
-        QString imagePath, startingDirectory;
-
-        QString documentName = QFileInfo(d->textDocument->filePath()).baseName();
-        if (!d->textDocument->isNew()) {
-            startingDirectory = QFileInfo(d->textDocument->filePath()).dir().path();
-            imagePath = startingDirectory + "/" + documentName + "_";
-        } else {
-            imagePath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/";
-        }
-
-        imagePath += QDateTime::currentDateTime().toString("yyyyMMddhhmmsszzz") + ".png";
-
-        imagePath = QFileDialog::getSaveFileName(this, tr("Save Image"), imagePath, d->imageSaveFilter);
-
-        if (!imagePath.isNull() && !imagePath.isEmpty()) {
-            // Write the image to the path selected by the user
-            QImageWriter writer;
-            writer.setFileName(imagePath);
-
-            if (!writer.write(image)) {
-                QMessageBox::critical(this, qApp->applicationName(), writer.errorString());
-                QPlainTextEdit::insertFromMimeData(source);
-                return;
-            }
-
-            QFileInfo imgInfo(imagePath);
-            bool isRelativePath = false;
-
-            if (imgInfo.exists()) {
-                if (!d->textDocument->isNew()) {
-                    QFileInfo docInfo(d->textDocument->filePath());
-
-                    if (docInfo.exists()) {
-                        imagePath = docInfo.dir().relativeFilePath(imagePath);
-                        isRelativePath = true;
-                    }
-                }
-            }
-
-            if (!isRelativePath) {
-                imagePath = QString("file://") + imagePath;
-            }
-
-            QTextCursor cursor = (this->textCursor());
-            cursor.insertText(QString("![](%1)").arg(imagePath));
-        }
-    } else {
+    if (!source->hasImage()) {
         QPlainTextEdit::insertFromMimeData(source);
+        return;
+    }
+
+    const QImage image = qvariant_cast<QImage>(source->imageData());
+    if (image.isNull()) {
+        return;
+    }
+
+    if (!d->textDocument->isNew()) {
+        const QString imagePath = pastedImagePath(d->textDocument->filePath());
+        if (!writePng(image, imagePath)) {
+            QMessageBox::critical(this, qApp->applicationName(), tr("Could not save the pasted image."));
+            return;
+        }
+
+        const QString relative = QFileInfo(d->textDocument->filePath()).dir().relativeFilePath(imagePath);
+        textCursor().insertText(QStringLiteral("![](%1)").arg(markdownImageTarget(relative)));
+        return;
+    }
+
+    QString imagePath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QLatin1Char('/');
+    imagePath += QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMddhhmmsszzz")) + QStringLiteral(".png");
+    imagePath = QFileDialog::getSaveFileName(this, tr("Save Image"), imagePath, d->imageSaveFilter);
+    if (imagePath.isEmpty()) {
+        return;
+    }
+    if (!writePng(image, imagePath)) {
+        QMessageBox::critical(this, qApp->applicationName(), tr("Could not save the pasted image."));
+        return;
+    }
+
+    textCursor().insertText(QStringLiteral("![](%1)").arg(markdownImageTarget(QStringLiteral("file://") + imagePath)));
+}
+
+void MarkdownEditor::syncInlineImages()
+{
+    Q_D(MarkdownEditor);
+
+    auto *layout = qobject_cast<InlineImageLayout *>(document()->documentLayout());
+    if (!layout) {
+        return;
+    }
+
+    const QString path = d->textDocument->filePath();
+    layout->setDocumentDirectory(path.isEmpty() ? QString() : QFileInfo(path).absolutePath());
+    layout->setColumnWidth(viewport()->width());
+    viewport()->update();
+}
+
+void MarkdownEditor::paintInlineImages()
+{
+    auto *layout = qobject_cast<InlineImageLayout *>(document()->documentLayout());
+    if (!layout) {
+        return;
+    }
+
+    QPainter painter(viewport());
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+
+    QPointF offset = contentOffset();
+    QTextBlock block = firstVisibleBlock();
+
+    while (block.isValid()) {
+        const QRectF rect = blockBoundingRect(block).translated(offset);
+        const QPixmap thumbnail = layout->thumbnail(block);
+
+        if (!thumbnail.isNull()) {
+            const qreal textHeight = rect.height() - layout->extraHeight(block);
+            const QRectF imageRect(rect.left() + (rect.width() - thumbnail.width()) / 2.0,
+                                   rect.top() + textHeight + inlineImageTopGap,
+                                   thumbnail.width(),
+                                   thumbnail.height());
+            QPainterPath clip;
+            clip.addRoundedRect(imageRect, thumbnailCornerRadius, thumbnailCornerRadius);
+            painter.save();
+            painter.setClipPath(clip);
+            painter.drawPixmap(imageRect.topLeft(), thumbnail);
+            painter.restore();
+        }
+
+        offset.ry() += rect.height();
+        if (offset.y() > viewport()->height()) {
+            break;
+        }
+        block = block.next();
     }
 }
 

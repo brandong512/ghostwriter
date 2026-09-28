@@ -24,6 +24,8 @@ target_sources(ghostwriter PRIVATE
     editor/actions/inlinemarkuptoggle.cpp
     editor/asynctextwriter.cpp
     editor/markdowndocument.cpp
+    editor/inlineimagecache.cpp
+    editor/inlineimagelayout.cpp
     editor/markdowneditor.cpp
     editor/markdownhighlighter.cpp
     editor/textblockdata.h
@@ -75,6 +77,7 @@ target_sources(ghostwriter PRIVATE
     margin/margintheme.cpp
     margin/readview.cpp
     margin/shortcutspanel.cpp
+    margin/themecrossfade.cpp
     margin/topedgebar.cpp
     messageboxhelper.cpp
     outlinewidget.cpp

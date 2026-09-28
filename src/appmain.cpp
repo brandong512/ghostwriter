@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
 
-    const int writingFontId = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Newsreader-Variable.ttf"));
+    const int writingFontId = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Merriweather-Variable.ttf"));
     const QStringList writingFamilies = QFontDatabase::applicationFontFamilies(writingFontId);
     app.setProperty("marginWritingFamily", writingFamilies.isEmpty() ? QStringLiteral("Georgia") : writingFamilies.first());
 
